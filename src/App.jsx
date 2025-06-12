@@ -152,7 +152,7 @@ const PitchGraphCard = ({
     ctx.lineWidth = 3;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    ctx.beginPath();
+    ctx.beginPath(); 
     filtered.forEach((pt, i) => {
       const x = marginLeft + ((pt.time - start) / (end - start)) * drawWidth;
       const y = marginTop + drawHeight - ((pt.pitch - pitchMin) / (pitchMax - pitchMin)) * drawHeight;
