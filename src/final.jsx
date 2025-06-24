@@ -8,6 +8,7 @@ import {
   VictoryVoronoiContainer,
 } from 'victory';
 import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 // Swara names and their positions in cents (relative to tonic Sa)
 const SWARA_LABELS = [
@@ -46,7 +47,11 @@ const parsePitchData = (text) => {
   return data;
 };
 
+// Get swara ticks for the visible cents range, but ensure enough vertical space between ticks
 const getSwaraTicks = (minCents, maxCents, minSpacing = 60, height = 280) => {
+  // minSpacing: minimum vertical px between swara labels
+  // height: chart height in px (default 280)
+  // Returns only swaras that are at least minSpacing px apart
   const ticks = [];
   const allTicks = [];
   const minOctave = Math.floor(minCents / 1200);
@@ -62,6 +67,7 @@ const getSwaraTicks = (minCents, maxCents, minSpacing = 60, height = 280) => {
       }
     });
   }
+  // Filter so that no two swaras are too close vertically
   let lastY = null;
   allTicks.forEach(tick => {
     const yNorm = (tick.value - minCents) / (maxCents - minCents || 1);
@@ -74,6 +80,7 @@ const getSwaraTicks = (minCents, maxCents, minSpacing = 60, height = 280) => {
   return ticks;
 };
 
+// Helper to get y ticks for cents grid lines
 const getYTicks = (min, max, count = 5) => {
   if (!isFinite(min) || !isFinite(max) || min === max) return [];
   const ticks = [];
@@ -98,6 +105,7 @@ const PitchGraphCard = ({
   useSameFile,
   yAxisType,
 }) => {
+  // Filter and convert to cents
   const filteredData = (() => {
     if (!startTime || !endTime || !tonic) return [];
     const s = Number(startTime);
@@ -111,7 +119,7 @@ const PitchGraphCard = ({
   })();
 
   const canvasRef = useRef(null);
-  const graphOnlyRef = useRef(null);
+  const cardRef = useRef(null);
 
   // Draw canvas with horizontal grid lines for swaras or cents
   const drawGraph = () => {
@@ -159,7 +167,7 @@ const PitchGraphCard = ({
     const drawWidth = w - marginLeft - marginRight;
     const drawHeight = h - marginTop - marginBottom;
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
     ctx.fillRect(marginLeft, marginTop, drawWidth, drawHeight);
 
     // Draw horizontal grid lines for swaras or cents
@@ -182,6 +190,7 @@ const PitchGraphCard = ({
         ctx.textAlign = 'right';
         ctx.fillText(label, marginLeft - 18, yPos);
       });
+      // Draw "Swaras" heading
       ctx.save();
       ctx.font = 'bold 15px "Poppins", monospace';
       ctx.fillStyle = '#1e40af';
@@ -190,6 +199,7 @@ const PitchGraphCard = ({
       ctx.fillText('Swaras', marginLeft - 18, marginTop - 18);
       ctx.restore();
     } else {
+      // Cents grid
       const yTicks = getYTicks(safeCentsMin, safeCentsMax, 5);
       yTicks.forEach((yVal) => {
         const yPos = marginTop + drawHeight - ((yVal - safeCentsMin) / (safeCentsMax - safeCentsMin || 1)) * drawHeight;
@@ -201,6 +211,7 @@ const PitchGraphCard = ({
         ctx.fillStyle = '#4b5563';
         ctx.fillText(yVal.toFixed(1), marginLeft - 18, yPos);
       });
+      // Draw "Cents" heading
       ctx.save();
       ctx.font = 'bold 15px "Poppins", monospace';
       ctx.fillStyle = '#1e40af';
@@ -258,10 +269,10 @@ const PitchGraphCard = ({
     // eslint-disable-next-line
   }, [filteredData, startTime, endTime, tonic, graphType, yAxisType]);
 
-  // Export only the graph section as image with white background
+  // Export this card as image
   const handleExportImage = async () => {
-    if (graphOnlyRef.current) {
-      const canvas = await html2canvas(graphOnlyRef.current, { backgroundColor: "#fff" });
+    if (cardRef.current) {
+      const canvas = await html2canvas(cardRef.current, { backgroundColor: null });
       const link = document.createElement('a');
       link.download = `pitch-graph-${index + 1}.png`;
       link.href = canvas.toDataURL('image/png');
@@ -269,8 +280,23 @@ const PitchGraphCard = ({
     }
   };
 
+  // Export this card as PDF
+  const handleExportPDF = async () => {
+    if (cardRef.current) {
+      const canvas = await html2canvas(cardRef.current, { backgroundColor: '#fff' });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'px',
+        format: [canvas.width, canvas.height],
+      });
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save(`pitch-graph-${index + 1}.pdf`);
+    }
+  };
+
   return (
-    <section style={styles.card} aria-label={`Pitch Graph ${index + 1}`}>
+    <section ref={cardRef} style={styles.card} aria-label={`Pitch Graph ${index + 1}`}>
       <h2 style={styles.cardTitle}>Pitch Graph {index + 1}</h2>
 
       {!useSameFile && (
@@ -341,91 +367,90 @@ const PitchGraphCard = ({
         </div>
       </div>
 
-      {/* Only the graph section for export */}
-      <div ref={graphOnlyRef} style={{ background: "#fff", borderRadius: 30, padding: 0 }}>
-        <div style={styles.chartWrapper}>
-          {graphType === 'victory' ? (
-            filteredData.length > 0 ? (
-              <VictoryChart
-                theme={VictoryTheme.material}
-                domain={{
-                  x: [Number(startTime), Number(endTime)],
-                  y: [
-                    Math.min(...filteredData.map(d => d.y)),
-                    Math.max(...filteredData.map(d => d.y))
-                  ]
+      <div style={styles.chartWrapper}>
+        {graphType === 'victory' ? (
+          filteredData.length > 0 ? (
+            <VictoryChart
+              theme={VictoryTheme.material}
+              domain={{
+                x: [Number(startTime), Number(endTime)],
+                y: [
+                  Math.min(...filteredData.map(d => d.y)),
+                  Math.max(...filteredData.map(d => d.y))
+                ]
+              }}
+              containerComponent={
+                <VictoryVoronoiContainer
+                  labels={({ datum }) => `Time: ${datum.x.toFixed(2)} s\nCents: ${datum.y.toFixed(2)}`}
+                  labelComponent={<VictoryTooltip cornerRadius={4} flyoutStyle={{ fill: "white" }}/> }
+                />
+              }
+              height={280}
+              width={380}
+              padding={{ top: 30, bottom: 60, left: 80, right: 20 }}
+            >
+              <VictoryAxis
+                label="Time (s)"
+                tickFormat={(tick) => `${tick.toFixed(2)}`}
+                style={{ axisLabel: { padding: 40, fontWeight: 'bold' } }}
+              />
+              <VictoryAxis
+                dependentAxis
+                label={yAxisType === 'swaras' ? 'Swaras' : 'Cents'}
+                tickValues={(() => {
+                  const minY = Math.min(...filteredData.map(d => d.y));
+                  const maxY = Math.max(...filteredData.map(d => d.y));
+                  if (yAxisType === 'swaras') {
+                    // Use filtered swara ticks for enough spacing
+                    return getSwaraTicks(minY, maxY, 40, 220).map(t => t.value);
+                  } else {
+                    return getYTicks(minY, maxY, 5);
+                  }
+                })()}
+                tickFormat={(y) => {
+                  if (yAxisType === 'swaras') {
+                    const ticks = getSwaraTicks(y, y, 40, 220);
+                    const tick = ticks.find(t => t.value === y);
+                    return tick ? tick.label : '';
+                  } else {
+                    return y.toFixed(1);
+                  }
                 }}
-                containerComponent={
-                  <VictoryVoronoiContainer
-                    labels={({ datum }) => `Time: ${datum.x.toFixed(2)} s\nCents: ${datum.y.toFixed(2)}`}
-                    labelComponent={<VictoryTooltip cornerRadius={4} flyoutStyle={{ fill: "white" }}/> }
+                style={{
+                  axisLabel: { padding: 60, fontWeight: 'bold', textAnchor: 'end' },
+                  tickLabels: { fontWeight: 600, fill: '#1e40af', textAnchor: 'end', dx: -18 },
+                  grid: { stroke: "#a3a3a3", strokeDasharray: "4,4" }
+                }}
+                gridComponent={
+                  <line
+                    style={{
+                      stroke: "#a3a3a3",
+                      strokeDasharray: "4,4"
+                    }}
                   />
                 }
-                height={280}
-                width={380}
-                padding={{ top: 30, bottom: 60, left: 80, right: 20 }}
-              >
-                <VictoryAxis
-                  label="Time (s)"
-                  tickFormat={(tick) => `${tick.toFixed(2)}`}
-                  style={{ axisLabel: { padding: 40, fontWeight: 'bold' } }}
-                />
-                <VictoryAxis
-                  dependentAxis
-                  label={yAxisType === 'swaras' ? 'Swaras' : 'Cents'}
-                  tickValues={(() => {
-                    const minY = Math.min(...filteredData.map(d => d.y));
-                    const maxY = Math.max(...filteredData.map(d => d.y));
-                    if (yAxisType === 'swaras') {
-                      return getSwaraTicks(minY, maxY, 40, 220).map(t => t.value);
-                    } else {
-                      return getYTicks(minY, maxY, 5);
-                    }
-                  })()}
-                  tickFormat={(y) => {
-                    if (yAxisType === 'swaras') {
-                      const ticks = getSwaraTicks(y, y, 40, 220);
-                      const tick = ticks.find(t => t.value === y);
-                      return tick ? tick.label : '';
-                    } else {
-                      return y.toFixed(1);
-                    }
-                  }}
-                  style={{
-                    axisLabel: { padding: 60, fontWeight: 'bold', textAnchor: 'end' },
-                    tickLabels: { fontWeight: 600, fill: '#1e40af', textAnchor: 'end', dx: -18 },
-                    grid: { stroke: "#a3a3a3", strokeDasharray: "4,4" }
-                  }}
-                  gridComponent={
-                    <line
-                      style={{
-                        stroke: "#a3a3a3",
-                        strokeDasharray: "4,4"
-                      }}
-                    />
-                  }
-                />
-                <VictoryLine
-                  data={filteredData}
-                  style={{
-                    data: { stroke: "#4f46e5", strokeWidth: 3 },
-                    parent: { border: "1px solid #ccc"}
-                  }}
-                  interpolation="monotoneX"
-                />
-              </VictoryChart>
-            ) : (
-              <p style={{ textAlign: 'center', color: '#6b7280', marginTop: 100 }}>
-                Please upload a file and enter valid start/end times and tonic.
-              </p>
-            )
+              />
+              <VictoryLine
+                data={filteredData}
+                style={{
+                  data: { stroke: "#4f46e5", strokeWidth: 3 },
+                  parent: { border: "1px solid #ccc"}
+                }}
+                interpolation="monotoneX"
+              />
+            </VictoryChart>
           ) : (
-            <canvas ref={canvasRef} style={{ width: '100%', height: '280px', background: "#fff" }} />
-          )}
-        </div>
+            <p style={{ textAlign: 'center', color: '#6b7280', marginTop: 100 }}>
+              Please upload a file and enter valid start/end times and tonic.
+            </p>
+          )
+        ) : (
+          <canvas ref={canvasRef} style={{ width: '100%', height: '280px' }} />
+        )}
       </div>
       <div style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center' }}>
-        <button style={styles.exportBtn} onClick={handleExportImage}>Export Graph as Image</button>
+        <button style={styles.exportBtn} onClick={handleExportImage}>Export as Image</button>
+        <button style={styles.exportBtn} onClick={handleExportPDF}>Export as PDF</button>
       </div>
     </section>
   );
@@ -438,6 +463,7 @@ const PitchGraphMulti = () => {
   const [graphType, setGraphType] = useState('victory');
   const [yAxisType, setYAxisType] = useState('swaras');
   const [sharedFileData, setSharedFileData] = useState({ pitchData: [], fileName: '' });
+  const pageRef = useRef(null);
 
   useEffect(() => {
     if (numCards && Number(numCards) > 0) {
@@ -483,6 +509,7 @@ const PitchGraphMulti = () => {
     reader.readAsText(file);
   };
 
+  // For shared file
   const onSharedFileChange = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -537,6 +564,32 @@ const PitchGraphMulti = () => {
     });
   };
 
+  // Export the whole page as image
+  const handleExportPageImage = async () => {
+    if (pageRef.current) {
+      const canvas = await html2canvas(pageRef.current, { backgroundColor: null });
+      const link = document.createElement('a');
+      link.download = `pitch-graphs-page.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+  };
+
+  // Export the whole page as PDF
+  const handleExportPagePDF = async () => {
+    if (pageRef.current) {
+      const canvas = await html2canvas(pageRef.current, { backgroundColor: '#fff' });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'px',
+        format: [canvas.width, canvas.height],
+      });
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save(`pitch-graphs-page.pdf`);
+    }
+  };
+
   return (
     <>
       <style>{`
@@ -552,7 +605,7 @@ const PitchGraphMulti = () => {
         }
         * { box-sizing: border-box; }
       `}</style>
-      <main role="main" aria-label="Pitch graphs grid" style={styles.container}>
+      <main ref={pageRef} role="main" aria-label="Pitch graphs grid" style={styles.container}>
         <h1 style={styles.title}>Pitch Graph Viewer</h1>
 
         <div style={styles.centeredPrompt}>
@@ -567,6 +620,7 @@ const PitchGraphMulti = () => {
             style={styles.miniInput}
             value={numCards}
             onChange={e => {
+              // Allow empty string for clearing/backspace
               const val = e.target.value;
               if (val === '' || (Number(val) > 0 && Number(val) <= 20)) setNumCards(val);
             }}
@@ -624,6 +678,11 @@ const PitchGraphMulti = () => {
             <option value="swaras">Swaras</option>
             <option value="cents">Cents</option>
           </select>
+        </div>
+
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <button style={styles.exportBtn} onClick={handleExportPageImage}>Export Page as Image</button>
+          <button style={styles.exportBtn} onClick={handleExportPagePDF}>Export Page as PDF</button>
         </div>
 
         <div style={styles.grid}>
